@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,33 +24,27 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.Air
-import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Thermostat
-import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SelectableDates
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,27 +59,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.domain.model.SoundingLevel
 import com.example.domain.model.SoundingProfile
-import com.example.domain.physics.AtmosphericCalculator
 import com.example.domain.model.UpperAirStation
 import com.example.ui.ChartViewType
 import com.example.ui.SoundingDataMode
 import com.example.ui.UpperAirUiState
+import com.example.ui.components.FullscreenSkewTDialog
 import com.example.ui.components.HodographChart
+import com.example.ui.components.SharppyLevelsTable
+import com.example.ui.components.SharppyTelemetryPanel
 import com.example.ui.components.SiteSearchBar
 import com.example.ui.components.SkewTChart
 import com.example.ui.theme.DewpointEmerald
-import com.example.ui.theme.InstabilityCoral
 import com.example.ui.theme.SkyCyan
-import com.example.ui.theme.StormViolet
 import com.example.ui.theme.ThermalAmber
 import com.example.ui.util.TimeFormatters
 import kotlin.math.roundToInt
@@ -108,8 +100,11 @@ fun SoundingScreen(
     modifier: Modifier = Modifier
 ) {
     val activeProfile = uiState.activeProfile
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    var showFullscreenSkewT by remember { mutableStateOf(false) }
     var showHistoricalDatePicker by remember { mutableStateOf(false) }
     var selectedSynopticHour by remember { mutableIntStateOf(12) }
+    var inspectedLevel by remember(activeProfile) { mutableStateOf<SoundingLevel?>(null) }
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -119,100 +114,88 @@ fun SoundingScreen(
             modifier = Modifier
                 .widthIn(max = 760.dp)
                 .fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 0. Site & Location Search Bar
+            // 1. Compact SPC/SHARPpy Top Command Bar (Station + Collapsible Search + Sync)
             item {
-                SiteSearchBar(
-                    query = uiState.siteQueryInput,
-                    suggestions = uiState.siteSuggestions,
-                    isResolving = uiState.isResolvingSite,
-                    onQueryChange = onSiteQueryChange,
-                    onSelectStation = onSelectResolvedSite,
-                    onSubmitQuery = onSubmitSiteQuery
-                )
-            }
-
-            // 1. Station Header + Live Sync Action
-            item {
-                StationHeaderCard(
+                CompactStationCommandBar(
                     uiState = uiState,
+                    isSearchExpanded = isSearchExpanded,
                     onOpenStationPicker = onOpenStationPicker,
+                    onToggleSearch = {
+                        isSearchExpanded = !isSearchExpanded
+                        if (!isSearchExpanded && uiState.siteQueryInput.isNotEmpty()) {
+                            onSiteQueryChange("")
+                        }
+                    },
                     onSyncNow = onSyncNow
                 )
             }
 
-            // Optional Sync Status Banner
+            // 1B. Collapsible Site & Location Search Bar (expands only when requested)
+            item {
+                AnimatedVisibility(visible = isSearchExpanded) {
+                    SiteSearchBar(
+                        query = uiState.siteQueryInput,
+                        suggestions = uiState.siteSuggestions,
+                        isResolving = uiState.isResolvingSite,
+                        onQueryChange = onSiteQueryChange,
+                        onSelectStation = { station ->
+                            isSearchExpanded = false
+                            onSelectResolvedSite(station)
+                        },
+                        onSubmitQuery = { query ->
+                            isSearchExpanded = false
+                            onSubmitSiteQuery(query)
+                        }
+                    )
+                }
+            }
+
+            // Optional Compact Status Chip
             if (uiState.statusBanner != null) {
                 item {
                     Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onDismissBanner() }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
                                 text = uiState.statusBanner,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = "Dismiss",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "DISMISS",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SkyCyan
                             )
                         }
                     }
                 }
             }
 
-            // 2. Mode Switcher (Latest Obs, Past Obs Archive, GFS 7-Day, RRFS 3km)
+            // 2. Slim High-Density Data Mode Strip
             item {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SegmentedButton(
-                        selected = uiState.dataMode == SoundingDataMode.OBSERVED,
-                        onClick = { onSelectMode(SoundingDataMode.OBSERVED) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 4),
-                        modifier = Modifier.testTag("mode_observed_btn")
-                    ) {
-                        Text("Latest", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                    }
-                    SegmentedButton(
-                        selected = uiState.dataMode == SoundingDataMode.PAST_OBSERVED,
-                        onClick = { onSelectMode(SoundingDataMode.PAST_OBSERVED) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 4),
-                        modifier = Modifier.testTag("mode_past_btn")
-                    ) {
-                        Text("Past Obs", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                    }
-                    SegmentedButton(
-                        selected = uiState.dataMode == SoundingDataMode.FORECAST_GFS,
-                        onClick = { onSelectMode(SoundingDataMode.FORECAST_GFS) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 4),
-                        modifier = Modifier.testTag("mode_forecast_btn")
-                    ) {
-                        Text("GFS 7d", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                    }
-                    SegmentedButton(
-                        selected = uiState.dataMode == SoundingDataMode.FORECAST_RRFS,
-                        onClick = { onSelectMode(SoundingDataMode.FORECAST_RRFS) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 3, count = 4),
-                        modifier = Modifier.testTag("mode_rrfs_btn")
-                    ) {
-                        Text("RRFS 3km", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                    }
-                }
+                CompactModeStrip(
+                    selectedMode = uiState.dataMode,
+                    onSelectMode = onSelectMode
+                )
             }
 
-            // 3A. Past Observed RAOB Archive Card (when in PAST_OBSERVED mode)
+            // 3A. Past Observed Archive Bar
             item {
                 AnimatedVisibility(visible = uiState.dataMode == SoundingDataMode.PAST_OBSERVED) {
                     PastSoundingsCard(
@@ -229,7 +212,7 @@ fun SoundingScreen(
                 }
             }
 
-            // 3B. Forecast Timeline Scrubber (when in GFS or RRFS forecast mode)
+            // 3B. Forecast Timeline Scrubber (GFS / RRFS)
             item {
                 val showTimeline = uiState.dataMode == SoundingDataMode.FORECAST_GFS ||
                     uiState.dataMode == SoundingDataMode.FORECAST_RRFS
@@ -243,7 +226,7 @@ fun SoundingScreen(
                 }
             }
 
-            // 4. Main Sounding Visualization or Empty State
+            // 4. Sounding Workspace (Integrated Chart Header + Chart + SHARPpy Matrices)
             if (activeProfile == null) {
                 item {
                     EmptySoundingCard(
@@ -253,46 +236,29 @@ fun SoundingScreen(
                     )
                 }
             } else {
-                // Valid time & source pill + Chart Type Switcher
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ProfileMetaBar(profile = activeProfile)
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            ChartViewType.entries.forEachIndexed { idx, type ->
-                                val label = when (type) {
-                                    ChartViewType.SKEW_T -> "Skew-T"
-                                    ChartViewType.HODOGRAPH -> "Hodograph"
-                                    ChartViewType.LEVELS_TABLE -> "Levels"
-                                }
-                                SegmentedButton(
-                                    selected = uiState.chartViewType == type,
-                                    onClick = { onSelectChartType(type) },
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = idx,
-                                        count = ChartViewType.entries.size
-                                    ),
-                                    modifier = Modifier.testTag("chart_tab_${type.name.lowercase()}")
-                                ) {
-                                    Text(label)
-                                }
-                            }
-                        }
-                    }
+                    IntegratedChartHeader(
+                        profile = activeProfile,
+                        selectedChart = uiState.chartViewType,
+                        onSelectChartType = onSelectChartType
+                    )
                 }
 
-                // Interactive Chart
                 item {
                     when (uiState.chartViewType) {
                         ChartViewType.SKEW_T -> SkewTChart(
                             profile = activeProfile,
                             useFahrenheit = uiState.settings.useFahrenheit,
-                            useMph = uiState.settings.useMph
+                            useMph = uiState.settings.useMph,
+                            inspectedLevel = inspectedLevel,
+                            onInspectLevel = { inspectedLevel = it },
+                            onOpenFullscreen = { showFullscreenSkewT = true }
                         )
                         ChartViewType.HODOGRAPH -> HodographChart(
                             profile = activeProfile,
                             useMph = uiState.settings.useMph
                         )
-                        ChartViewType.LEVELS_TABLE -> LevelsTableCard(
+                        ChartViewType.LEVELS_TABLE -> SharppyLevelsTable(
                             levels = activeProfile.levels,
                             useFahrenheit = uiState.settings.useFahrenheit,
                             useMph = uiState.settings.useMph
@@ -300,16 +266,31 @@ fun SoundingScreen(
                     }
                 }
 
-                // Thermodynamic & Kinematic Telemetry Grid
                 item {
-                    ThermodynamicTelemetryGrid(
+                    SharppyTelemetryPanel(
                         profile = activeProfile,
+                        useFahrenheit = uiState.settings.useFahrenheit,
                         useMph = uiState.settings.useMph
                     )
                 }
             }
         }
 
+        // Fullscreen Skew-T Inspector Modal
+        if (showFullscreenSkewT && activeProfile != null) {
+            val st = uiState.activeStation
+            FullscreenSkewTDialog(
+                stationLabel = "${st.effectiveRaobIcao} • ${st.name}",
+                profile = activeProfile,
+                useFahrenheit = uiState.settings.useFahrenheit,
+                useMph = uiState.settings.useMph,
+                inspectedLevel = inspectedLevel,
+                onInspectLevel = { inspectedLevel = it },
+                onDismiss = { showFullscreenSkewT = false }
+            )
+        }
+
+        // Historical RAOB Date Picker Dialog
         if (showHistoricalDatePicker) {
             val todayEndMs = System.currentTimeMillis()
             val datePickerState = rememberDatePickerState(
@@ -348,131 +329,264 @@ fun SoundingScreen(
 }
 
 @Composable
-private fun StationHeaderCard(
+private fun CompactStationCommandBar(
     uiState: UpperAirUiState,
+    isSearchExpanded: Boolean,
     onOpenStationPicker: () -> Unit,
+    onToggleSearch: () -> Unit,
     onSyncNow: () -> Unit
 ) {
     val station = uiState.activeStation
     val lastSynced = uiState.stationLastSyncMap[station.id] ?: 0L
+    val badgeCode = if (station.raobIcaoOverride != null) station.effectiveRaobIcao.take(4) else station.id
 
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(18.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            SkyCyan.copy(alpha = 0.14f),
-                            Color.Transparent
-                        )
-                    )
-                )
-                .padding(14.dp)
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onOpenStationPicker)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                    .testTag("station_selector_button"),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(SkyCyan.copy(alpha = 0.16f))
+                        .border(1.dp, SkyCyan.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = badgeCode,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = SkyCyan,
+                        maxLines = 1
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${station.name}, ${station.state}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Switch station",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    val statusLine = buildString {
+                        append("${station.elevationM}m")
+                        if (lastSynced > 0L) {
+                            append(" • Cached ${TimeFormatters.formatRelativeAge(lastSynced)}")
+                        } else {
+                            append(" • Not cached")
+                        }
+                        if (uiState.settings.dailyOfflineCacheEnabled) {
+                            append(" • Daily")
+                        }
+                    }
+                    Text(
+                        text = statusLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (lastSynced > 0L) DewpointEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onToggleSearch,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("toggle_site_search_button")
+            ) {
+                Icon(
+                    imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
+                    contentDescription = if (isSearchExpanded) "Close site search" else "Search station or city",
+                    tint = if (isSearchExpanded) ThermalAmber else SkyCyan,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            IconButton(
+                onClick = onSyncNow,
+                enabled = !uiState.isSyncing,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("sync_now_button")
+            ) {
+                if (uiState.isSyncing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = SkyCyan
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Download latest sounding, archive, GFS, and RRFS",
+                        tint = SkyCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactModeStrip(
+    selectedMode: SoundingDataMode,
+    onSelectMode: (SoundingDataMode) -> Unit
+) {
+    val options = listOf(
+        Triple(SoundingDataMode.OBSERVED, "Latest", "mode_observed_btn"),
+        Triple(SoundingDataMode.PAST_OBSERVED, "Past Obs", "mode_past_btn"),
+        Triple(SoundingDataMode.FORECAST_GFS, "GFS 7d", "mode_forecast_btn"),
+        Triple(SoundingDataMode.FORECAST_RRFS, "RRFS 3km", "mode_rrfs_btn")
+    )
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            options.forEach { (mode, label, tag) ->
+                val active = selectedMode == mode
+                Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(onClick = onOpenStationPicker)
-                        .padding(4.dp)
-                        .testTag("station_selector_button"),
-                    verticalAlignment = Alignment.CenterVertically
+                        .heightIn(min = 38.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (active) SkyCyan.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface.copy(alpha = 0f))
+                        .then(
+                            if (active) Modifier.border(1.dp, SkyCyan.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                            else Modifier
+                        )
+                        .clickable { onSelectMode(mode) }
+                        .testTag(tag),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SkyCyan.copy(alpha = 0.18f))
-                            .border(1.dp, SkyCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (station.raobIcaoOverride != null) station.effectiveRaobIcao.take(4) else station.id,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = SkyCyan,
-                            maxLines = 1
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${station.name}, ${station.state}",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Switch station",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        val nwsNote = uiState.observedSounding?.nwsOfficeHeadline?.takeIf { it.isNotBlank() }
-                        val siteMeta = if (station.raobIcaoOverride != null) {
-                            "RAOB ${station.effectiveRaobIcao} • Elev ${station.elevationM}m • ${nwsNote ?: "Model Point"}"
-                        } else {
-                            "${station.icao} • Elev ${station.elevationM}m • ${nwsNote ?: "WMO ${station.wmo}"}"
-                        }
-                        Text(
-                            text = siteMeta,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        val cacheStatus = when {
-                            lastSynced > 0 && uiState.settings.dailyOfflineCacheEnabled ->
-                                "Offline cached • ${TimeFormatters.formatRelativeAge(lastSynced)} • Daily sync ON"
-                            lastSynced > 0 ->
-                                "Offline cached • ${TimeFormatters.formatRelativeAge(lastSynced)}"
-                            else -> "Tap sync to download offline cache"
-                        }
-                        Text(
-                            text = cacheStatus,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = DewpointEmerald,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                        color = if (active) SkyCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
+            }
+        }
+    }
+}
 
-                IconButton(
-                    onClick = onSyncNow,
-                    enabled = !uiState.isSyncing,
+@Composable
+private fun IntegratedChartHeader(
+    profile: SoundingProfile,
+    selectedChart: ChartViewType,
+    onSelectChartType: (ChartViewType) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(if (profile.isForecast) ThermalAmber else DewpointEmerald)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(
+                    text = profile.sourceLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${TimeFormatters.formatUtcShort(profile.validEpochMs)} • ${profile.levels.size} lvls",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ChartViewType.entries.forEach { type ->
+                val active = selectedChart == type
+                val label = when (type) {
+                    ChartViewType.SKEW_T -> "Skew-T"
+                    ChartViewType.HODOGRAPH -> "Hodo"
+                    ChartViewType.LEVELS_TABLE -> "Table"
+                }
+                Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .testTag("sync_now_button")
+                        .heightIn(min = 34.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (active) SkyCyan.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface)
+                        .border(
+                            1.dp,
+                            if (active) SkyCyan else MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .clickable { onSelectChartType(type) }
+                        .padding(horizontal = 9.dp, vertical = 6.dp)
+                        .testTag("chart_tab_${type.name.lowercase()}"),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (uiState.isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.5.dp,
-                            color = SkyCyan
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Download latest sounding, GFS, and RRFS forecasts",
-                            tint = SkyCyan
-                        )
-                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                        color = if (active) SkyCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -486,20 +600,20 @@ private fun ForecastTimelineCard(
     selectedIndex: Int,
     onSelectIndex: (Int) -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        shape = RoundedCornerShape(16.dp),
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             if (forecasts.isEmpty()) {
                 Text(
                     text = if (isRrfs) {
-                        "No NOAA RRFS 3km profiles cached yet. Tap Sync to download high-resolution RRFS soundings."
+                        "No NOAA RRFS 3km profiles cached yet. Tap Sync to download."
                     } else {
-                        "No 7-day forecast profiles cached yet. Tap Sync to download NOAA GFS up to +168h."
+                        "No 7-day GFS forecast profiles cached yet. Tap Sync to download."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -518,12 +632,12 @@ private fun ForecastTimelineCard(
                             imageVector = Icons.Outlined.Schedule,
                             contentDescription = null,
                             tint = ThermalAmber,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = "$modelPrefix +${current.forecastHourOffset}h (Day ${current.forecastHourOffset / 24 + 1})",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "$modelPrefix +${current.forecastHourOffset}h (D${current.forecastHourOffset / 24 + 1})",
+                            style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -534,15 +648,45 @@ private fun ForecastTimelineCard(
                     )
                 }
 
-                Slider(
-                    value = safeIdx.toFloat(),
-                    onValueChange = { onSelectIndex(it.roundToInt()) },
-                    valueRange = 0f..(forecasts.lastIndex.coerceAtLeast(1)).toFloat(),
-                    steps = (forecasts.size - 2).coerceAtLeast(0),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("forecast_hour_slider")
-                )
+                // Precision Step Arrows + Slider
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { onSelectIndex((safeIdx - 1).coerceAtLeast(0)) },
+                        enabled = safeIdx > 0,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("forecast_step_prev")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Previous forecast hour"
+                        )
+                    }
+                    Slider(
+                        value = safeIdx.toFloat(),
+                        onValueChange = { onSelectIndex(it.roundToInt()) },
+                        valueRange = 0f..(forecasts.lastIndex.coerceAtLeast(1)).toFloat(),
+                        steps = (forecasts.size - 2).coerceAtLeast(0),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("forecast_hour_slider")
+                    )
+                    IconButton(
+                        onClick = { onSelectIndex((safeIdx + 1).coerceAtMost(forecasts.lastIndex)) },
+                        enabled = safeIdx < forecasts.lastIndex,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("forecast_step_next")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Next forecast hour"
+                        )
+                    }
+                }
 
                 val maxDay = (forecasts.maxOf { it.forecastHourOffset } / 24).coerceIn(0, 7)
                 Row(
@@ -561,7 +705,7 @@ private fun ForecastTimelineCard(
                                 onClick = { onSelectIndex(matchIdx) },
                                 label = {
                                     Text(
-                                        text = if (day == 0) "Today" else "Day +$day",
+                                        text = if (day == 0) "Today" else "D+$day",
                                         style = MaterialTheme.typography.labelSmall
                                     )
                                 }
@@ -586,20 +730,20 @@ private fun PastSoundingsCard(
     onOpenDatePicker: () -> Unit,
     onFetchPastSevenDays: () -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        shape = RoundedCornerShape(16.dp),
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (pastSoundings.isEmpty()) {
                 Text(
-                    text = "No past RAOB launches cached yet for $stationRaobCode. Load the past 7 days or pick any historical date below.",
+                    text = "No past RAOB launches cached yet for $stationRaobCode. Load the past 7 days or pick a date.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -616,12 +760,12 @@ private fun PastSoundingsCard(
                             imageVector = Icons.Default.History,
                             contentDescription = null,
                             tint = DewpointEmerald,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = "Archive (${pastSoundings.size} cached)",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "Archive (${pastSoundings.size} launches)",
+                            style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -633,15 +777,44 @@ private fun PastSoundingsCard(
                 }
 
                 if (pastSoundings.size > 1) {
-                    Slider(
-                        value = safeIdx.toFloat(),
-                        onValueChange = { onSelectIndex(it.roundToInt()) },
-                        valueRange = 0f..(pastSoundings.lastIndex.coerceAtLeast(1)).toFloat(),
-                        steps = (pastSoundings.size - 2).coerceAtLeast(0),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("past_sounding_slider")
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { onSelectIndex((safeIdx - 1).coerceAtLeast(0)) },
+                            enabled = safeIdx > 0,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("past_step_prev")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                contentDescription = "Newer launch"
+                            )
+                        }
+                        Slider(
+                            value = safeIdx.toFloat(),
+                            onValueChange = { onSelectIndex(it.roundToInt()) },
+                            valueRange = 0f..(pastSoundings.lastIndex.coerceAtLeast(1)).toFloat(),
+                            steps = (pastSoundings.size - 2).coerceAtLeast(0),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("past_sounding_slider")
+                        )
+                        IconButton(
+                            onClick = { onSelectIndex((safeIdx + 1).coerceAtMost(pastSoundings.lastIndex)) },
+                            enabled = safeIdx < pastSoundings.lastIndex,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("past_step_next")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Older launch"
+                            )
+                        }
+                    }
                 }
 
                 Row(
@@ -666,10 +839,9 @@ private fun PastSoundingsCard(
                 }
             }
 
-            // Historical Date + 00Z/12Z Cycle Lookup Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FilterChip(
@@ -696,7 +868,7 @@ private fun PastSoundingsCard(
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text("Pick Date", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 FilledTonalButton(
@@ -716,227 +888,6 @@ private fun PastSoundingsCard(
 }
 
 @Composable
-private fun ProfileMetaBar(profile: SoundingProfile) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(if (profile.isForecast) ThermalAmber else DewpointEmerald)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = profile.sourceLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Text(
-            text = "${profile.levels.size} lvls • ${TimeFormatters.formatUtcShort(profile.validEpochMs)}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun ThermodynamicTelemetryGrid(
-    profile: SoundingProfile,
-    useMph: Boolean
-) {
-    val idx = profile.indices
-    val maxW = if (useMph) "${(idx.maxWindKt * 1.15078).roundToInt()} mph" else "${idx.maxWindKt} kt"
-    val shear06 = if (useMph) "${(idx.shear06Kt * 1.15078).roundToInt()} mph" else "${idx.shear06Kt} kt"
-    val shear01 = if (useMph) "${(idx.shear01Kt * 1.15078).roundToInt()} mph" else "${idx.shear01Kt} kt"
-    val pwatIn = "%.2f in".format(idx.pwatMm / 25.4)
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Atmospheric Parameters",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TelemetryKpiCard(
-                title = "SBCAPE / CIN",
-                value = "${idx.sbcapeJkg} J/kg",
-                subtitle = "CIN ${idx.sbcinJkg} • ML ${idx.mlcapeJkg}",
-                icon = Icons.Outlined.Bolt,
-                accent = InstabilityCoral,
-                modifier = Modifier.weight(1f)
-            )
-            TelemetryKpiCard(
-                title = "Bulk Shear",
-                value = "0-6km $shear06",
-                subtitle = "0-1km $shear01 • SRH ${idx.srh03M2S2}",
-                icon = Icons.Outlined.Air,
-                accent = SkyCyan,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TelemetryKpiCard(
-                title = "Moisture / PWAT",
-                value = "${idx.pwatMm} mm ($pwatIn)",
-                subtitle = "LCL ${idx.lclMeters}m (${idx.lclHpa} hPa)",
-                icon = Icons.Outlined.WaterDrop,
-                accent = DewpointEmerald,
-                modifier = Modifier.weight(1f)
-            )
-            TelemetryKpiCard(
-                title = "Freezing & Lapse",
-                value = "${idx.freezingLevelM} m",
-                subtitle = "700-500 LR ${idx.lapseRate700500}°C/km",
-                icon = Icons.Outlined.Thermostat,
-                accent = ThermalAmber,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TelemetryKpiCard(
-                title = "Stability Indices",
-                value = "LI ${idx.liftedIndex}",
-                subtitle = "K ${idx.kIndex} • TT ${idx.totalTotals}",
-                icon = Icons.Outlined.Bolt,
-                accent = StormViolet,
-                modifier = Modifier.weight(1f)
-            )
-            TelemetryKpiCard(
-                title = "Jet Max Wind",
-                value = maxW,
-                subtitle = "Peak @ ${idx.maxWindPressureHpa} hPa",
-                icon = Icons.Outlined.Air,
-                accent = SkyCyan,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun TelemetryKpiCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    icon: ImageVector,
-    accent: Color,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(14.dp),
-        modifier = modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun LevelsTableCard(
-    levels: List<SoundingLevel>,
-    useFahrenheit: Boolean,
-    useMph: Boolean
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-            .padding(12.dp)
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("PRES", style = MaterialTheme.typography.labelSmall, color = SkyCyan, modifier = Modifier.weight(1f))
-                Text("HGHT", style = MaterialTheme.typography.labelSmall, color = SkyCyan, modifier = Modifier.weight(1f))
-                Text("TEMP", style = MaterialTheme.typography.labelSmall, color = ThermalAmber, modifier = Modifier.weight(1f))
-                Text("DEWP", style = MaterialTheme.typography.labelSmall, color = DewpointEmerald, modifier = Modifier.weight(1f))
-                Text("WIND", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.2f))
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            for (lvl in levels.take(40)) {
-                val tStr = TimeFormatters.formatTemp(lvl.tempC, useFahrenheit)
-                val tdStr = lvl.dewpointC?.let { TimeFormatters.formatTemp(it, useFahrenheit) } ?: "--"
-                val wStr = if (lvl.windDirDeg != null && lvl.windSpeedKt != null) {
-                    val spd = if (useMph) "${(lvl.windSpeedKt * 1.15078).roundToInt()}" else "${lvl.windSpeedKt.roundToInt()}"
-                    "${lvl.windDirDeg.roundToInt().toString().padStart(3, '0')}°/$spd"
-                } else "--"
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("${lvl.pressureHpa.roundToInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                    Text("${lvl.heightM.roundToInt()}m", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                    Text(tStr, style = MaterialTheme.typography.labelSmall, color = ThermalAmber, modifier = Modifier.weight(1f))
-                    Text(tdStr, style = MaterialTheme.typography.labelSmall, color = DewpointEmerald, modifier = Modifier.weight(1f))
-                    Text(wStr, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1.2f))
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-            }
-        }
-    }
-}
-
-@Composable
 private fun EmptySoundingCard(
     isSyncing: Boolean,
     stationIcao: String,
@@ -944,31 +895,31 @@ private fun EmptySoundingCard(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(18.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(28.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(
                 imageVector = Icons.Filled.CloudDownload,
                 contentDescription = null,
                 tint = SkyCyan,
-                modifier = Modifier.size(44.dp)
+                modifier = Modifier.size(40.dp)
             )
             Text(
                 text = if (isSyncing) "Downloading $stationIcao Soundings..." else "Ready to Download $stationIcao",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Fetches the latest NWS radiosonde launch (00Z/12Z) and 7 days of NOAA GFS upper-atmosphere model profiles.",
+                text = "Fetches latest & past 7d NWS RAOB launches plus NOAA GFS (7-day) and RRFS 3km profiles.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -977,7 +928,7 @@ private fun EmptySoundingCard(
                 enabled = !isSyncing,
                 modifier = Modifier.testTag("empty_sync_button")
             ) {
-                Text(if (isSyncing) "Downloading..." else "Download Sounding & 7-Day Forecast")
+                Text(if (isSyncing) "Downloading..." else "Download Sounding & Forecasts")
             }
         }
     }

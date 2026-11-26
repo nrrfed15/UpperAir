@@ -61,10 +61,10 @@ fun HodographChart(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-            .padding(12.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+            .padding(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -72,18 +72,18 @@ fun HodographChart(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Wind Shear Hodograph",
-                style = MaterialTheme.typography.titleMedium,
+                text = "HODOGRAPH (BUNKERS RM)",
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "0–6km ${profile.indices.shear06Kt} kt • SRH ${profile.indices.srh03M2S2} m²/s²",
+                text = "0–6km ${profile.indices.shear06Kt}kt • SRH ${profile.indices.srh03M2S2}",
                 style = MaterialTheme.typography.labelSmall,
                 color = SkyCyan
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Box(
             modifier = Modifier

@@ -100,8 +100,8 @@ fun StationsScreen(
             modifier = Modifier
                 .widthIn(max = 760.dp)
                 .fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item {
                 Row(
@@ -268,19 +268,19 @@ private fun StationDirectoryRow(
     val borderColor = if (isActive) SkyCyan else MaterialTheme.colorScheme.outlineVariant
 
     Surface(
-        color = if (isActive) SkyCyan.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(14.dp),
+        color = if (isActive) SkyCyan.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
             .clickable(onClick = onSelect)
             .testTag("station_row_${station.id}")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
