@@ -9,6 +9,7 @@ import com.example.domain.model.SoundingProfile
 import com.example.domain.model.SyncLogEntry
 import com.example.domain.model.UpperAirStation
 import com.example.domain.model.UserSettings
+import com.example.domain.physics.ParcelType
 import com.example.worker.SoundingSyncScheduler
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -36,11 +37,24 @@ enum class ChartViewType {
     LEVELS_TABLE
 }
 
+data class MapPinSelection(
+    val lat: Double,
+    val lon: Double,
+    val station: UpperAirStation,
+    val nearestRaob: UpperAirStation,
+    val distanceToRaobKm: Double,
+    val isNwsRaobSite: Boolean,
+    val isResolvingName: Boolean = false
+)
+
 data class UpperAirUiState(
     val settings: UserSettings = UserSettings(),
     val activeStation: UpperAirStation = NwsStationsCatalog.findById("OUN"),
     val dataMode: SoundingDataMode = SoundingDataMode.OBSERVED,
     val chartViewType: ChartViewType = ChartViewType.SKEW_T,
+    val selectedParcelType: ParcelType = ParcelType.SURFACE_BASED,
+    val showMiniHodograph: Boolean = true,
+    val mapPin: MapPinSelection? = null,
     val observedSounding: SoundingProfile? = null,
     val pastObservedSoundings: List<SoundingProfile> = emptyList(),
     val selectedPastIndex: Int = 0,
@@ -234,10 +248,21 @@ class UpperAirViewModel(
     private val isResolvingSiteFlow = MutableStateFlow(false)
     private var suggestJob: Job? = null
 
+    private val selectedParcelTypeFlow = MutableStateFlow(ParcelType.SURFACE_BASED)
+    private val showMiniHodographFlow = MutableStateFlow(true)
+    private val mapPinFlow = MutableStateFlow<MapPinSelection?>(null)
+    private var mapLookupJob: Job? = null
+
     private data class SiteSearchBundle(
         val queryInput: String,
         val suggestions: List<UpperAirStation>,
         val isResolving: Boolean
+    )
+
+    private data class SharppyAndMapBundle(
+        val parcelType: ParcelType,
+        val showMiniHodo: Boolean,
+        val mapPin: MapPinSelection?
     )
 
     private val siteSearchFlow = combine(
@@ -248,12 +273,21 @@ class UpperAirViewModel(
         SiteSearchBundle(q, list, resolving)
     }
 
+    private val sharppyAndMapFlow = combine(
+        selectedParcelTypeFlow,
+        showMiniHodographFlow,
+        mapPinFlow
+    ) { parcel, showHodo, pin ->
+        SharppyAndMapBundle(parcel, showHodo, pin)
+    }
+
     val uiState: StateFlow<UpperAirUiState> = combine(
         repository.settingsFlow,
         cacheAndLogsFlow,
         metaFlow,
-        siteSearchFlow
-    ) { settings, bundle, meta, siteSearch ->
+        siteSearchFlow,
+        sharppyAndMapFlow
+    ) { settings, bundle, meta, siteSearch, sharppyMap ->
         val activeList = if (meta.dataMode == SoundingDataMode.FORECAST_RRFS) {
             bundle.rrfsForecasts
         } else {
@@ -266,6 +300,9 @@ class UpperAirViewModel(
             activeStation = repository.resolveStation(settings.selectedStationId, settings.customStations),
             dataMode = meta.dataMode,
             chartViewType = meta.chartType,
+            selectedParcelType = sharppyMap.parcelType,
+            showMiniHodograph = sharppyMap.showMiniHodo,
+            mapPin = sharppyMap.mapPin,
             observedSounding = bundle.observed,
             pastObservedSoundings = bundle.pastObserved,
             selectedPastIndex = safePastIdx,
@@ -375,6 +412,81 @@ class UpperAirViewModel(
 
     fun setChartViewType(type: ChartViewType) {
         chartTypeFlow.value = type
+    }
+
+    fun setParcelType(type: ParcelType) {
+        selectedParcelTypeFlow.value = type
+    }
+
+    fun toggleMiniHodograph() {
+        showMiniHodographFlow.value = !showMiniHodographFlow.value
+    }
+
+    fun dropMapPin(lat: Double, lon: Double) {
+        mapLookupJob?.cancel()
+        val nearestRaob = NwsStationsCatalog.findNearestStation(lat, lon)
+        val distKm = NwsStationsCatalog.distanceKm(lat, lon, nearestRaob.lat, nearestRaob.lon)
+        val immediate = repository.createImmediateMapStation(lat, lon)
+        mapPinFlow.value = MapPinSelection(
+            lat = lat,
+            lon = lon,
+            station = immediate,
+            nearestRaob = nearestRaob,
+            distanceToRaobKm = distKm,
+            isNwsRaobSite = false,
+            isResolvingName = true
+        )
+        mapLookupJob = viewModelScope.launch {
+            val resolved = repository.resolveMapPoint(lat, lon)
+            val current = mapPinFlow.value
+            if (current != null && current.station.id == immediate.id) {
+                mapPinFlow.value = current.copy(
+                    station = resolved,
+                    isResolvingName = false
+                )
+            }
+        }
+    }
+
+    fun selectMapStation(station: UpperAirStation) {
+        mapLookupJob?.cancel()
+        val nearestRaob = NwsStationsCatalog.findNearestStation(station.lat, station.lon)
+        val distKm = NwsStationsCatalog.distanceKm(station.lat, station.lon, nearestRaob.lat, nearestRaob.lon)
+        val isCatalogSite = NwsStationsCatalog.findByIdOrNull(station.id) != null
+        mapPinFlow.value = MapPinSelection(
+            lat = station.lat,
+            lon = station.lon,
+            station = station,
+            nearestRaob = nearestRaob,
+            distanceToRaobKm = if (isCatalogSite) 0.0 else distKm,
+            isNwsRaobSite = isCatalogSite,
+            isResolvingName = false
+        )
+    }
+
+    fun clearMapPin() {
+        mapLookupJob?.cancel()
+        mapPinFlow.value = null
+    }
+
+    fun loadSelectedMapPointRrfs() {
+        val pin = mapPinFlow.value ?: return
+        viewModelScope.launch {
+            repository.selectResolvedStation(pin.station)
+            dataModeFlow.value = SoundingDataMode.FORECAST_RRFS
+            chartTypeFlow.value = ChartViewType.SKEW_T
+            selectedForecastIndexFlow.value = 0
+            selectedPastIndexFlow.value = 0
+            syncActiveStation(pin.station.id, sourceTag = "MAP_RRFS")
+        }
+    }
+
+    fun togglePinSelectedMapPoint() {
+        val pin = mapPinFlow.value ?: return
+        viewModelScope.launch {
+            repository.saveCustomStation(pin.station)
+            repository.togglePinnedStation(pin.station.id)
+        }
     }
 
     fun selectForecastIndex(index: Int) {

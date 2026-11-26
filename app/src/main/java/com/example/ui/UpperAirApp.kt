@@ -19,10 +19,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Tune
@@ -60,6 +62,7 @@ import com.example.ui.screens.OutlookScreen
 import com.example.ui.screens.SoundingScreen
 import com.example.ui.screens.StationsScreen
 import com.example.ui.screens.SyncSettingsScreen
+import com.example.ui.screens.UsaMapScreen
 import com.example.ui.theme.SkyCyan
 
 private enum class TopTab(
@@ -69,6 +72,7 @@ private enum class TopTab(
     val unselectedIcon: ImageVector
 ) {
     Sounding("sounding", "Sounding", Icons.Filled.Timeline, Icons.Outlined.Timeline),
+    Map("map", "Map", Icons.Filled.Map, Icons.Outlined.Map),
     Outlook("outlook", "7-Day", Icons.Filled.CloudSync, Icons.Outlined.CloudSync),
     Stations("stations", "Stations", Icons.Filled.Public, Icons.Outlined.Public),
     Sync("sync", "Auto-Sync", Icons.Filled.Tune, Icons.Outlined.Tune)
@@ -165,7 +169,22 @@ fun UpperAirApp(viewModel: UpperAirViewModel) {
                             onDismissBanner = viewModel::dismissBanner,
                             onSiteQueryChange = viewModel::updateSiteQueryInput,
                             onSelectResolvedSite = viewModel::selectResolvedSite,
-                            onSubmitSiteQuery = viewModel::submitSiteQuery
+                            onSubmitSiteQuery = viewModel::submitSiteQuery,
+                            onSelectParcelType = viewModel::setParcelType,
+                            onToggleMiniHodograph = viewModel::toggleMiniHodograph
+                        )
+                    }
+                    composable(TopTab.Map.route) {
+                        UsaMapScreen(
+                            uiState = uiState,
+                            onDropMapPin = viewModel::dropMapPin,
+                            onSelectMapStation = viewModel::selectMapStation,
+                            onClearMapPin = viewModel::clearMapPin,
+                            onLoadSelectedMapPointRrfs = {
+                                viewModel.loadSelectedMapPointRrfs()
+                                navigateToTab(TopTab.Sounding.route)
+                            },
+                            onTogglePinSelectedMapPoint = viewModel::togglePinSelectedMapPoint
                         )
                     }
                     composable(TopTab.Outlook.route) {

@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import com.example.domain.model.SoundingLevel
 import com.example.domain.model.SoundingProfile
 import com.example.domain.model.UpperAirStation
+import com.example.domain.physics.ParcelType
 import com.example.ui.ChartViewType
 import com.example.ui.SoundingDataMode
 import com.example.ui.UpperAirUiState
@@ -97,6 +98,8 @@ fun SoundingScreen(
     onSiteQueryChange: (String) -> Unit,
     onSelectResolvedSite: (UpperAirStation) -> Unit,
     onSubmitSiteQuery: (String) -> Unit,
+    onSelectParcelType: (ParcelType) -> Unit = {},
+    onToggleMiniHodograph: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val activeProfile = uiState.activeProfile
@@ -252,7 +255,10 @@ fun SoundingScreen(
                             useMph = uiState.settings.useMph,
                             inspectedLevel = inspectedLevel,
                             onInspectLevel = { inspectedLevel = it },
-                            onOpenFullscreen = { showFullscreenSkewT = true }
+                            onOpenFullscreen = { showFullscreenSkewT = true },
+                            parcelType = uiState.selectedParcelType,
+                            showMiniHodograph = uiState.showMiniHodograph,
+                            onToggleMiniHodograph = onToggleMiniHodograph
                         )
                         ChartViewType.HODOGRAPH -> HodographChart(
                             profile = activeProfile,
@@ -270,7 +276,9 @@ fun SoundingScreen(
                     SharppyTelemetryPanel(
                         profile = activeProfile,
                         useFahrenheit = uiState.settings.useFahrenheit,
-                        useMph = uiState.settings.useMph
+                        useMph = uiState.settings.useMph,
+                        selectedParcelType = uiState.selectedParcelType,
+                        onSelectParcelType = onSelectParcelType
                     )
                 }
             }
@@ -286,7 +294,11 @@ fun SoundingScreen(
                 useMph = uiState.settings.useMph,
                 inspectedLevel = inspectedLevel,
                 onInspectLevel = { inspectedLevel = it },
-                onDismiss = { showFullscreenSkewT = false }
+                onDismiss = { showFullscreenSkewT = false },
+                parcelType = uiState.selectedParcelType,
+                onSelectParcelType = onSelectParcelType,
+                showMiniHodograph = uiState.showMiniHodograph,
+                onToggleMiniHodograph = onToggleMiniHodograph
             )
         }
 

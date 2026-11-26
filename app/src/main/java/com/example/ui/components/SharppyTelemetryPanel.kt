@@ -25,8 +25,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.testTag
 import com.example.domain.model.SoundingLevel
 import com.example.domain.model.SoundingProfile
+import com.example.domain.physics.AtmosphericCalculator
+import com.example.domain.physics.ParcelType
 import com.example.ui.theme.DewpointEmerald
 import com.example.ui.theme.InstabilityCoral
 import com.example.ui.theme.SkyCyan
@@ -39,23 +44,42 @@ import kotlin.math.roundToInt
 /**
  * High-density SPC / SHARPpy-style meteorological parameter matrices:
  * 1. Mandatory Pressure Levels Quick Strip (850 / 700 / 500 / 300 hPa)
- * 2. Parcel & Instability Table (SBCAPE, MLCAPE, CIN, LI, LCL, LFC, EL)
- * 3. Kinematics & Shear Table (0-1km, 0-6km, SRH 0-3km, Jet Max)
- * 4. Moisture & Thermal Profile (PWAT, 0°C Freezing, 700-500 LR, K, TT)
+ * 2. Interactive Parcel & Thermodynamics Matrix ([SB | ML | MU] + CAPE, CIN, LI, LCL, LFC, EL)
+ * 3. SPC Severe Weather Composites (SCP, Fixed-Layer STP, 0-1km SRH, 0-1km EHI)
+ * 4. Kinematics & Shear Table (0-1km, 0-6km, SRH 0-3km, Jet Max)
+ * 5. Moisture & Thermal Profile (PWAT, 0°C Freezing, 700-500 LR, K, TT)
  */
 @Composable
 fun SharppyTelemetryPanel(
     profile: SoundingProfile,
     useFahrenheit: Boolean,
     useMph: Boolean,
+    selectedParcelType: ParcelType = ParcelType.SURFACE_BASED,
+    onSelectParcelType: (ParcelType) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val idx = profile.indices
+    val sortedLevels = remember(profile) { profile.levels.sortedByDescending { it.pressureHpa } }
+    val activeParcel = remember(sortedLevels, selectedParcelType) {
+        AtmosphericCalculator.computeParcelAnalysis(sortedLevels, selectedParcelType)
+    }
+    val composites = remember(sortedLevels) {
+        AtmosphericCalculator.computeSevereComposites(sortedLevels)
+    }
+
     val wUnit = if (useMph) "mph" else "kt"
     val shear06 = if (useMph) (idx.shear06Kt * 1.15078).roundToInt() else idx.shear06Kt
     val shear01 = if (useMph) (idx.shear01Kt * 1.15078).roundToInt() else idx.shear01Kt
     val maxWind = if (useMph) (idx.maxWindKt * 1.15078).roundToInt() else idx.maxWindKt
     val pwatIn = "%.2f\"".format(idx.pwatMm / 25.4)
+
+    val displayedCape = if (selectedParcelType == ParcelType.SURFACE_BASED) idx.sbcapeJkg else activeParcel.capeJkg
+    val displayedCin = if (selectedParcelType == ParcelType.SURFACE_BASED) idx.sbcinJkg else activeParcel.cinJkg
+    val displayedLi = if (selectedParcelType == ParcelType.SURFACE_BASED) idx.liftedIndex else activeParcel.liftedIndex
+    val displayedLclM = activeParcel.lclHeightM.roundToInt()
+    val displayedLclHpa = activeParcel.lclPressureHpa.roundToInt()
+    val displayedLfcM = activeParcel.lfcHeightM?.roundToInt()
+    val displayedElM = activeParcel.elHeightM?.roundToInt()
 
     val capeAccent = when {
         idx.sbcapeJkg >= 2000 -> InstabilityCoral
@@ -143,29 +167,105 @@ fun SharppyTelemetryPanel(
             }
         }
 
-        // 2. Parcel & Instability Matrix
+        // 2. Interactive Parcel & Thermodynamics Matrix ([SB | ML | MU])
         SharppySectionFrame(
             title = "PARCEL & THERMODYNAMICS",
-            trailing = severityLabel(idx.sbcapeJkg, idx.shear06Kt),
+            trailing = severityLabel(maxOf(displayedCape, composites.mucapeJkg), idx.shear06Kt),
             accentColor = capeAccent
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ParcelType.entries.forEach { pt ->
+                    val active = pt == selectedParcelType
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 34.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (active) SkyCyan.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface)
+                            .border(
+                                1.dp,
+                                if (active) SkyCyan else MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable { onSelectParcelType(pt) }
+                            .testTag("parcel_switch_${pt.code.lowercase()}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${pt.code} • ${pt.label.substringBefore("-")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            color = if (active) SkyCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
             MatrixRow(
                 cells = listOf(
-                    MatrixCell("SBCAPE", "${idx.sbcapeJkg} J/kg", capeAccent),
-                    MatrixCell("MLCAPE", "${idx.mlcapeJkg} J/kg", if (idx.mlcapeJkg >= 1000) ThermalAmber else MaterialTheme.colorScheme.onSurface),
-                    MatrixCell("SBCIN", "${idx.sbcinJkg} J/kg", MaterialTheme.colorScheme.onSurfaceVariant)
+                    MatrixCell("${selectedParcelType.code}CAPE", "$displayedCape J/kg", capeAccent),
+                    MatrixCell("${selectedParcelType.code}CIN", "$displayedCin J/kg", MaterialTheme.colorScheme.onSurfaceVariant),
+                    MatrixCell("SB / ML / MU", "${idx.sbcapeJkg}/${idx.mlcapeJkg}/${composites.mucapeJkg}", SkyCyan)
                 )
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
             MatrixRow(
                 cells = listOf(
-                    MatrixCell("LIFTED IDX", "${idx.liftedIndex}", if (idx.liftedIndex <= -4.0) InstabilityCoral else StormViolet),
-                    MatrixCell("LCL", "${idx.lclMeters}m (${idx.lclHpa})", DewpointEmerald),
+                    MatrixCell("LIFTED IDX", "$displayedLi", if (displayedLi <= -4.0) InstabilityCoral else StormViolet),
+                    MatrixCell("LCL", "${displayedLclM}m ($displayedLclHpa)", DewpointEmerald),
                     MatrixCell(
                         "LFC / EL",
-                        "${idx.lfcMeters?.let { "${it}m" } ?: "--"} / ${idx.elMeters?.let { "${(it / 1000.0).let { km -> "%.1fkm".format(km) }}" } ?: "--"}",
+                        "${displayedLfcM?.let { "${it}m" } ?: "--"} / ${displayedElM?.let { "${(it / 1000.0).let { km -> "%.1fkm".format(km) }}" } ?: "--"}",
                         MaterialTheme.colorScheme.onSurface
                     )
+                )
+            )
+        }
+
+        // 3. SPC Severe Composites Matrix (SCP, Fixed-Layer STP, 0-1km SRH, 0-1km EHI)
+        val scpColor = when {
+            composites.scp >= 4.0 -> InstabilityCoral
+            composites.scp >= 1.0 -> ThermalAmber
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+        val stpColor = when {
+            composites.stp >= 3.0 -> InstabilityCoral
+            composites.stp >= 1.0 -> ThermalAmber
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+        val srh01Color = when {
+            composites.srh01M2S2 >= 200 -> InstabilityCoral
+            composites.srh01M2S2 >= 100 -> ThermalAmber
+            else -> DewpointEmerald
+        }
+        val ehiColor = when {
+            composites.ehi01 >= 2.0 -> InstabilityCoral
+            composites.ehi01 >= 1.0 -> ThermalAmber
+            else -> SkyCyan
+        }
+        SharppySectionFrame(
+            title = "SPC SEVERE COMPOSITES",
+            trailing = when {
+                composites.stp >= 1.0 -> "TOR POTENTIAL"
+                composites.scp >= 1.0 -> "SUPERCELL ENV"
+                else -> "LOW COMPOSITE"
+            },
+            accentColor = if (composites.stp >= 1.0 || composites.scp >= 4.0) InstabilityCoral else if (composites.scp >= 1.0) ThermalAmber else DewpointEmerald
+        ) {
+            MatrixRow(
+                cells = listOf(
+                    MatrixCell("SCP", "%.1f".format(composites.scp), scpColor),
+                    MatrixCell("STP (FIX)", "%.1f".format(composites.stp), stpColor),
+                    MatrixCell("0-1KM SRH", "${composites.srh01M2S2} m²/s²", srh01Color),
+                    MatrixCell("0-1KM EHI", "%.1f".format(composites.ehi01), ehiColor)
                 )
             )
         }

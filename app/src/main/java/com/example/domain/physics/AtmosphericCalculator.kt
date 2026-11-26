@@ -16,6 +16,12 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+enum class ParcelType(val code: String, val label: String) {
+    SURFACE_BASED("SB", "Surface-Based"),
+    MIXED_LAYER("ML", "Mixed-Layer"),
+    MOST_UNSTABLE("MU", "Most-Unstable")
+}
+
 data class ParcelPoint(
     val pressureHpa: Double,
     val heightM: Double,
@@ -31,7 +37,18 @@ data class ParcelAnalysis(
     val elHeightM: Double?,
     val capeJkg: Int,
     val cinJkg: Int,
-    val liftedIndex: Double
+    val liftedIndex: Double,
+    val parcelType: ParcelType = ParcelType.SURFACE_BASED
+)
+
+data class SevereComposites(
+    val srh01M2S2: Int,
+    val srh03M2S2: Int,
+    val mucapeJkg: Int,
+    val mucinJkg: Int,
+    val scp: Double,
+    val stp: Double,
+    val ehi01: Double
 )
 
 object AtmosphericCalculator {
@@ -76,6 +93,18 @@ object AtmosphericCalculator {
     }
 
     /**
+     * Bolton (1980) equivalent potential temperature (K) used to identify the Most-Unstable parcel.
+     */
+    fun equivalentPotentialTempK(pressureHpa: Double, tempC: Double, dewpointC: Double): Double {
+        val tK = (tempC + 273.15).coerceAtLeast(160.0)
+        val tdK = min(dewpointC + 273.15, tK).coerceAtLeast(150.0)
+        val tLclK = (1.0 / ((1.0 / (tdK - 56.0)) + ln(tK / tdK) / 800.0) + 56.0).coerceAtLeast(150.0)
+        val r = mixingRatioKgKg(pressureHpa, tdK - 273.15).coerceIn(1e-6, 0.06)
+        val thetaDl = tK * (1000.0 / pressureHpa.coerceAtLeast(50.0)).pow(0.2854 * (1.0 - 0.28 * r))
+        return thetaDl * exp((3.376 / tLclK - 0.00254) * (r * 1000.0) * (1.0 + 0.81 * r))
+    }
+
+    /**
      * Computes dT/dp (C per hPa) along a pseudoadiabat.
      */
     private fun moistLapseRateDtdP(pressureHpa: Double, tempC: Double): Double {
@@ -89,9 +118,17 @@ object AtmosphericCalculator {
     fun computeParcelAnalysis(
         sortedLevels: List<SoundingLevel>,
         mixedLayer: Boolean = false
+    ): ParcelAnalysis = computeParcelAnalysis(
+        sortedLevels = sortedLevels,
+        parcelType = if (mixedLayer) ParcelType.MIXED_LAYER else ParcelType.SURFACE_BASED
+    )
+
+    fun computeParcelAnalysis(
+        sortedLevels: List<SoundingLevel>,
+        parcelType: ParcelType
     ): ParcelAnalysis {
         if (sortedLevels.size < 2) {
-            return ParcelAnalysis(emptyList(), 950.0, 500.0, null, null, 0, 0, 0.0)
+            return ParcelAnalysis(emptyList(), 950.0, 500.0, null, null, 0, 0, 0.0, parcelType)
         }
         val sfc = sortedLevels.first()
         val pStart: Double
@@ -99,18 +136,33 @@ object AtmosphericCalculator {
         val tStartC: Double
         val tdStartC: Double
 
-        if (mixedLayer) {
-            val topP = sfc.pressureHpa - 100.0
-            val mlLevels = sortedLevels.filter { it.pressureHpa >= topP }
-            pStart = sfc.pressureHpa
-            hStart = sfc.heightM
-            tStartC = mlLevels.map { it.tempC }.average()
-            tdStartC = mlLevels.mapNotNull { it.dewpointC }.ifEmpty { listOf(tStartC - 5.0) }.average()
-        } else {
-            pStart = sfc.pressureHpa
-            hStart = sfc.heightM
-            tStartC = sfc.tempC
-            tdStartC = sfc.dewpointC ?: (sfc.tempC - 5.0)
+        when (parcelType) {
+            ParcelType.MIXED_LAYER -> {
+                val topP = sfc.pressureHpa - 100.0
+                val mlLevels = sortedLevels.filter { it.pressureHpa >= topP }.ifEmpty { listOf(sfc) }
+                pStart = sfc.pressureHpa
+                hStart = sfc.heightM
+                tStartC = mlLevels.map { it.tempC }.average()
+                tdStartC = mlLevels.mapNotNull { it.dewpointC }.ifEmpty { listOf(tStartC - 5.0) }.average()
+            }
+            ParcelType.MOST_UNSTABLE -> {
+                val minP = sfc.pressureHpa - 300.0
+                val candidates = sortedLevels.filter { it.pressureHpa >= minP }.ifEmpty { listOf(sfc) }
+                val best = candidates.maxByOrNull { lvl ->
+                    val td = lvl.dewpointC ?: (lvl.tempC - 8.0)
+                    equivalentPotentialTempK(lvl.pressureHpa, lvl.tempC, td)
+                } ?: sfc
+                pStart = best.pressureHpa
+                hStart = best.heightM
+                tStartC = best.tempC
+                tdStartC = best.dewpointC ?: (best.tempC - 5.0)
+            }
+            ParcelType.SURFACE_BASED -> {
+                pStart = sfc.pressureHpa
+                hStart = sfc.heightM
+                tStartC = sfc.tempC
+                tdStartC = sfc.dewpointC ?: (sfc.tempC - 5.0)
+            }
         }
 
         // LCL temperature (Bolton 1980)
@@ -124,7 +176,7 @@ object AtmosphericCalculator {
         var currentP = pStart
         var currentT = tStartC
 
-        // Walk upward in 10 hPa steps from surface to 100 hPa for smooth parcel integration
+        // Walk upward in 10 hPa steps from parcel origin to 100 hPa for smooth parcel integration
         val stepHpa = 10.0
         var cape = 0.0
         var cin = 0.0
@@ -200,7 +252,8 @@ object AtmosphericCalculator {
             elHeightM = if (cape > 10.0) elH else null,
             capeJkg = cape.roundToInt().coerceAtLeast(0),
             cinJkg = cin.roundToInt().coerceAtMost(0),
-            liftedIndex = li
+            liftedIndex = li,
+            parcelType = parcelType
         )
     }
 
@@ -333,19 +386,23 @@ object AtmosphericCalculator {
         return uRight to vRight
     }
 
-    fun computeSrh03(sorted: List<SoundingLevel>): Int {
-        if (sorted.size < 3) return 0
+    fun computeSrh01(sorted: List<SoundingLevel>): Int = computeSrh(sorted, 1000.0)
+
+    fun computeSrh03(sorted: List<SoundingLevel>): Int = computeSrh(sorted, 3000.0)
+
+    fun computeSrh(sorted: List<SoundingLevel>, topHeightAglM: Double): Int {
+        if (sorted.size < 3 || topHeightAglM <= 0.0) return 0
         val sfcH = sorted.first().heightM
         val (cxKt, cyKt) = computeBunkersRightMotionKt(sorted)
         val ktToMs = 0.514444
         val cx = cxKt * ktToMs
         val cy = cyKt * ktToMs
 
-        val samples = 15
+        val samples = if (topHeightAglM <= 1500.0) 10 else 15
         var srh = 0.0
         var prevPair = windVectorAtHeight(sorted, sfcH)
         for (i in 1..samples) {
-            val h = sfcH + (3000.0 * i / samples)
+            val h = sfcH + (topHeightAglM * i / samples)
             val currPair = windVectorAtHeight(sorted, h)
             val u1 = prevPair.first * ktToMs - cx
             val v1 = prevPair.second * ktToMs - cy
@@ -355,6 +412,76 @@ object AtmosphericCalculator {
             prevPair = currPair
         }
         return srh.roundToInt()
+    }
+
+    /**
+     * Computes SPC-style operational severe weather composite indices (SCP, fixed-layer STP, 0-1km EHI)
+     * dynamically from the sounding vertical profile.
+     */
+    fun computeSevereComposites(levels: List<SoundingLevel>): SevereComposites {
+        val sorted = levels.sortedByDescending { it.pressureHpa }
+        if (sorted.size < 3) {
+            return SevereComposites(0, 0, 0, 0, 0.0, 0.0, 0.0)
+        }
+        val sbParcel = computeParcelAnalysis(sorted, ParcelType.SURFACE_BASED)
+        val muParcel = computeParcelAnalysis(sorted, ParcelType.MOST_UNSTABLE)
+        val srh01 = computeSrh01(sorted)
+        val srh03 = computeSrh03(sorted)
+
+        val sfcH = sorted.first().heightM
+        val (uSfc, vSfc) = windVectorAtHeight(sorted, sfcH)
+        val (u6km, v6km) = windVectorAtHeight(sorted, sfcH + 6000.0)
+        val shear06Kt = hypot(u6km - uSfc, v6km - vSfc)
+        val shear06Ms = shear06Kt * 0.514444
+
+        // Supercell Composite Parameter (SCP): (MUCAPE/1000) * (SRH03/50) * (BRN/0-6km shear term) * (CIN term)
+        val scpShearTerm = when {
+            shear06Ms < 10.0 -> 0.0
+            shear06Ms > 20.0 -> 1.0
+            else -> shear06Ms / 20.0
+        }
+        val scpCinTerm = if (muParcel.cinJkg >= -40) {
+            1.0
+        } else {
+            (-40.0 / muParcel.cinJkg.toDouble()).coerceIn(0.0, 1.0)
+        }
+        val rawScp = (muParcel.capeJkg / 1000.0) * (max(0, srh03) / 50.0) * scpShearTerm * scpCinTerm
+
+        // Significant Tornado Parameter (fixed-layer STP)
+        val lclAglM = (sbParcel.lclHeightM - sfcH).coerceAtLeast(0.0)
+        val lclTerm = when {
+            lclAglM < 1000.0 -> 1.0
+            lclAglM > 2000.0 -> 0.0
+            else -> (2000.0 - lclAglM) / 1000.0
+        }
+        val stpShearTerm = when {
+            shear06Ms < 12.5 -> 0.0
+            shear06Ms > 30.0 -> 1.5
+            else -> shear06Ms / 20.0
+        }
+        val stpCinTerm = when {
+            sbParcel.cinJkg >= -50 -> 1.0
+            sbParcel.cinJkg <= -200 -> 0.0
+            else -> (200.0 + sbParcel.cinJkg) / 150.0
+        }
+        val rawStp = (sbParcel.capeJkg / 1500.0) *
+            lclTerm *
+            (max(0, srh01) / 150.0) *
+            stpShearTerm *
+            stpCinTerm
+
+        // 0-1 km Energy-Helicity Index (EHI)
+        val rawEhi01 = (sbParcel.capeJkg * max(0, srh01)) / 160000.0
+
+        return SevereComposites(
+            srh01M2S2 = srh01,
+            srh03M2S2 = srh03,
+            mucapeJkg = muParcel.capeJkg,
+            mucinJkg = muParcel.cinJkg,
+            scp = (rawScp * 10.0).roundToInt() / 10.0,
+            stp = (rawStp * 10.0).roundToInt() / 10.0,
+            ehi01 = (rawEhi01 * 10.0).roundToInt() / 10.0
+        )
     }
 
     fun windVectorFromMet(dirDeg: Double, speedKt: Double): Pair<Double, Double> {

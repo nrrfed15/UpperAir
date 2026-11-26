@@ -214,4 +214,76 @@ class UpperAirPhysicsAndParserTest {
         assertEquals("2026-11-24T12:00:00Z", profiles[1].validTimeUtcIso)
         assertEquals("2026-11-23T00:00:00Z", profiles[2].validTimeUtcIso)
     }
+
+    @Test
+    fun parcelTypes_mostUnstableFindsElevatedInstabilityAndComputesScpStp() {
+        // Classic Plains supercell/tornado profile with strong veering 0-3km winds and low LCL
+        val supercellLevels = listOf(
+            SoundingLevel(975.0, 350.0, 27.0, 22.0, 140.0, 14.0),
+            SoundingLevel(950.0, 580.0, 25.0, 20.5, 165.0, 24.0),
+            SoundingLevel(900.0, 1060.0, 21.0, 17.0, 195.0, 34.0),
+            SoundingLevel(850.0, 1560.0, 17.5, 13.5, 215.0, 42.0),
+            SoundingLevel(700.0, 3160.0, 5.0, -5.0, 240.0, 52.0),
+            SoundingLevel(500.0, 5860.0, -15.0, -28.0, 255.0, 68.0),
+            SoundingLevel(300.0, 9550.0, -42.0, -54.0, 265.0, 88.0),
+            SoundingLevel(200.0, 12200.0, -58.0, -70.0, 270.0, 95.0)
+        )
+        val sb = AtmosphericCalculator.computeParcelAnalysis(supercellLevels, com.example.domain.physics.ParcelType.SURFACE_BASED)
+        val ml = AtmosphericCalculator.computeParcelAnalysis(supercellLevels, com.example.domain.physics.ParcelType.MIXED_LAYER)
+        val mu = AtmosphericCalculator.computeParcelAnalysis(supercellLevels, com.example.domain.physics.ParcelType.MOST_UNSTABLE)
+        val comp = AtmosphericCalculator.computeSevereComposites(supercellLevels)
+
+        assertTrue("Expected positive SBCAPE, was ${sb.capeJkg}", sb.capeJkg > 1000)
+        assertTrue("Expected positive MLCAPE, was ${ml.capeJkg}", ml.capeJkg > 500)
+        assertTrue("Expected MUCAPE >= SBCAPE, was ${mu.capeJkg} vs ${sb.capeJkg}", mu.capeJkg >= sb.capeJkg)
+        assertTrue("Expected positive 0-1km SRH > 100, was ${comp.srh01M2S2}", comp.srh01M2S2 > 100)
+        assertTrue("Expected elevated SCP > 1.0, was ${comp.scp}", comp.scp > 1.0)
+        assertTrue("Expected elevated STP > 0.5, was ${comp.stp}", comp.stp > 0.5)
+        assertTrue("Expected positive EHI 0-1km > 0.5, was ${comp.ehi01}", comp.ehi01 > 0.5)
+
+        // Elevated inversion sounding: cool stable surface, warm moist 850 hPa layer
+        val elevatedLevels = listOf(
+            SoundingLevel(980.0, 300.0, 10.0, 8.0, 90.0, 8.0),
+            SoundingLevel(925.0, 800.0, 14.0, 11.0, 150.0, 18.0),
+            SoundingLevel(850.0, 1500.0, 21.0, 18.0, 200.0, 35.0),
+            SoundingLevel(700.0, 3100.0, 6.0, -2.0, 235.0, 45.0),
+            SoundingLevel(500.0, 5800.0, -16.0, -26.0, 255.0, 60.0),
+            SoundingLevel(300.0, 9450.0, -42.0, -54.0, 265.0, 78.0)
+        )
+        val sbElev = AtmosphericCalculator.computeParcelAnalysis(elevatedLevels, com.example.domain.physics.ParcelType.SURFACE_BASED)
+        val muElev = AtmosphericCalculator.computeParcelAnalysis(elevatedLevels, com.example.domain.physics.ParcelType.MOST_UNSTABLE)
+        assertTrue("Expected MUCAPE (${muElev.capeJkg}) > SBCAPE (${sbElev.capeJkg}) for elevated inversion", muElev.capeJkg > sbElev.capeJkg + 400)
+    }
+
+    @Test
+    fun webMercator_roundTripProjectionIsAccurateAcrossUsa() {
+        val testPoints = listOf(
+            35.181 to -97.438,  // Norman, OK
+            61.167 to -150.017, // Anchorage, AK
+            21.307 to -157.858, // Honolulu, HI
+            40.713 to -74.006   // New York, NY
+        )
+        for ((lat, lon) in testPoints) {
+            val screen = com.example.ui.components.WebMercator.latLonToScreen(
+                lat = lat,
+                lon = lon,
+                centerLat = 38.6,
+                centerLon = -96.8,
+                zoom = 4.5f,
+                viewportWidthPx = 1080f,
+                viewportHeightPx = 1920f
+            )
+            val (outLat, outLon) = com.example.ui.components.WebMercator.screenToLatLon(
+                screenX = screen.x,
+                screenY = screen.y,
+                centerLat = 38.6,
+                centerLon = -96.8,
+                zoom = 4.5f,
+                viewportWidthPx = 1080f,
+                viewportHeightPx = 1920f
+            )
+            assertEquals("Lat mismatch for ($lat, $lon)", lat, outLat, 0.002)
+            assertEquals("Lon mismatch for ($lat, $lon)", lon, outLon, 0.002)
+        }
+    }
 }

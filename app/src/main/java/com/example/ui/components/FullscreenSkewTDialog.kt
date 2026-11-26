@@ -57,6 +57,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.domain.model.SoundingLevel
 import com.example.domain.model.SoundingProfile
 import com.example.domain.physics.AtmosphericCalculator
+import com.example.domain.physics.ParcelType
 import com.example.ui.theme.DewpointEmerald
 import com.example.ui.theme.InstabilityCoral
 import com.example.ui.theme.SkyCyan
@@ -73,16 +74,25 @@ fun FullscreenSkewTDialog(
     useMph: Boolean,
     inspectedLevel: SoundingLevel?,
     onInspectLevel: (SoundingLevel?) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    parcelType: ParcelType = ParcelType.SURFACE_BASED,
+    onSelectParcelType: (ParcelType) -> Unit = {},
+    showMiniHodograph: Boolean = true,
+    onToggleMiniHodograph: () -> Unit = {}
 ) {
     val levels = remember(profile) { profile.levels.sortedByDescending { it.pressureHpa } }
-    val parcelAnalysis = remember(levels) { AtmosphericCalculator.computeParcelAnalysis(levels) }
+    val parcelAnalysis = remember(levels, parcelType) {
+        AtmosphericCalculator.computeParcelAnalysis(levels, parcelType)
+    }
+    val bunkers = remember(levels) { AtmosphericCalculator.computeBunkersRightMotionKt(levels) }
+    val composites = remember(levels) { AtmosphericCalculator.computeSevereComposites(levels) }
     val textMeasurer = rememberTextMeasurer()
 
     var zoomScale by remember(profile) { mutableFloatStateOf(1f) }
     var panOffset by remember(profile) { mutableStateOf(Offset.Zero) }
     var scrubModeWhenZoomed by remember(profile) { mutableStateOf(false) }
 
+    val insetBg = MaterialTheme.colorScheme.background.copy(alpha = 0.86f)
     val chartColors = SkewTColors(
         gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.48f),
         subtleLineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
@@ -312,7 +322,11 @@ fun FullscreenSkewTDialog(
                                 useFahrenheit = useFahrenheit,
                                 colors = chartColors,
                                 textMeasurer = textMeasurer,
-                                highlightCursor = true
+                                highlightCursor = true,
+                                showMiniHodograph = showMiniHodograph,
+                                bunkersRightMotionKt = bunkers,
+                                shear06Kt = profile.indices.shear06Kt,
+                                insetBackgroundColor = insetBg
                             )
                         }
                     }
@@ -338,18 +352,74 @@ fun FullscreenSkewTDialog(
                         .fillMaxWidth()
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        CompactStat("SBCAPE", "${idx.sbcapeJkg}", InstabilityCoral)
-                        CompactStat("MLCAPE", "${idx.mlcapeJkg}", ThermalAmber)
-                        CompactStat("CIN", "${idx.sbcinJkg}", MaterialTheme.colorScheme.onSurfaceVariant)
-                        CompactStat("0-6 SHR", shearStr, SkyCyan)
-                        CompactStat("SRH 0-3", "${idx.srh03M2S2}", DewpointEmerald)
-                        CompactStat("LCL", "${idx.lclMeters}m", MaterialTheme.colorScheme.onSurface)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                ParcelType.entries.forEach { pt ->
+                                    val active = pt == parcelType
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(if (active) SkyCyan.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surface)
+                                            .border(
+                                                1.dp,
+                                                if (active) SkyCyan else MaterialTheme.colorScheme.outlineVariant,
+                                                RoundedCornerShape(5.dp)
+                                            )
+                                            .clickable { onSelectParcelType(pt) }
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            .testTag("fullscreen_parcel_${pt.code.lowercase()}")
+                                    ) {
+                                        Text(
+                                            text = pt.code,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (active) SkyCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(if (showMiniHodograph) SkyCyan.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface)
+                                    .border(
+                                        1.dp,
+                                        if (showMiniHodograph) SkyCyan else MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(5.dp)
+                                    )
+                                    .clickable(onClick = onToggleMiniHodograph)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    .testTag("fullscreen_hodo_toggle")
+                            ) {
+                                Text(
+                                    text = if (showMiniHodograph) "HODO ON" else "HODO OFF",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (showMiniHodograph) SkyCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            CompactStat("${parcelType.code}CAPE", "${parcelAnalysis.capeJkg}", InstabilityCoral)
+                            CompactStat("${parcelType.code}CIN", "${parcelAnalysis.cinJkg}", MaterialTheme.colorScheme.onSurfaceVariant)
+                            CompactStat("0-6 SHR", shearStr, SkyCyan)
+                            CompactStat("SCP", "%.1f".format(composites.scp), if (composites.scp >= 1.0) ThermalAmber else DewpointEmerald)
+                            CompactStat("STP", "%.1f".format(composites.stp), if (composites.stp >= 1.0) InstabilityCoral else DewpointEmerald)
+                            CompactStat("LCL", "${parcelAnalysis.lclHeightM.roundToInt()}m", MaterialTheme.colorScheme.onSurface)
+                        }
                     }
                 }
             }

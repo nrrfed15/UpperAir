@@ -214,6 +214,18 @@ class UpperAirRepository(
     suspend fun searchLocationsOnline(query: String): List<UpperAirStation> =
         client.searchLocationsOnline(query)
 
+    fun createImmediateMapStation(lat: Double, lon: Double): UpperAirStation =
+        client.createImmediateMapStation(lat, lon)
+
+    suspend fun resolveMapPoint(lat: Double, lon: Double): UpperAirStation =
+        client.resolveMapPoint(lat, lon)
+
+    suspend fun saveCustomStation(station: UpperAirStation) {
+        if (NwsStationsCatalog.findByIdOrNull(station.id) == null) {
+            settingsStore.saveCustomStation(station)
+        }
+    }
+
     suspend fun selectResolvedStation(station: UpperAirStation) {
         if (NwsStationsCatalog.findByIdOrNull(station.id) == null) {
             settingsStore.saveCustomStation(station)

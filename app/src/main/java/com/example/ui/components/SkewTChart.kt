@@ -55,14 +55,18 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
 import com.example.domain.model.SoundingLevel
 import com.example.domain.model.SoundingProfile
 import com.example.domain.physics.AtmosphericCalculator
 import com.example.domain.physics.ParcelAnalysis
+import com.example.domain.physics.ParcelType
 import com.example.ui.theme.DewpointEmerald
 import com.example.ui.theme.InstabilityCoral
 import com.example.ui.theme.ParcelGold
 import com.example.ui.theme.SkyCyan
+import com.example.ui.theme.StormViolet
 import com.example.ui.theme.ThermalAmber
 import kotlin.math.PI
 import kotlin.math.abs
@@ -112,14 +116,21 @@ fun SkewTChart(
     inspectedLevel: SoundingLevel?,
     onInspectLevel: (SoundingLevel?) -> Unit,
     onOpenFullscreen: () -> Unit,
+    parcelType: ParcelType = ParcelType.SURFACE_BASED,
+    showMiniHodograph: Boolean = true,
+    onToggleMiniHodograph: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val levels = remember(profile) { profile.levels.sortedByDescending { it.pressureHpa } }
-    val parcelAnalysis = remember(levels) { AtmosphericCalculator.computeParcelAnalysis(levels) }
+    val parcelAnalysis = remember(levels, parcelType) {
+        AtmosphericCalculator.computeParcelAnalysis(levels, parcelType)
+    }
+    val bunkers = remember(levels) { AtmosphericCalculator.computeBunkersRightMotionKt(levels) }
     var isScrubbing by remember(profile) { mutableStateOf(false) }
 
     val textMeasurer = rememberTextMeasurer()
     val haptics = LocalHapticFeedback.current
+    val insetBg = MaterialTheme.colorScheme.background.copy(alpha = 0.86f)
     val chartColors = SkewTColors(
         gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
         subtleLineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
@@ -138,26 +149,27 @@ fun SkewTChart(
             .border(borderWidth, borderColor, RoundedCornerShape(10.dp))
             .padding(horizontal = 8.dp, vertical = 6.dp)
     ) {
-        // Compact SHARPpy legend + gesture status + Fullscreen trigger
+        // Compact SHARPpy legend + gesture status + Mini-Hodo toggle + Fullscreen trigger
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 LegendChip(color = ThermalAmber, label = "T")
                 LegendChip(color = DewpointEmerald, label = "Td")
-                LegendChip(color = ParcelGold, label = "Parcel")
+                LegendChip(color = ParcelGold, label = parcelType.code)
                 if (isScrubbing) {
                     Surface(
                         color = SkyCyan.copy(alpha = 0.18f),
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            text = "SCRUBBING",
+                            text = "SCRUB",
                             style = MaterialTheme.typography.labelSmall,
                             color = SkyCyan,
                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
@@ -165,7 +177,7 @@ fun SkewTChart(
                     }
                 } else {
                     Text(
-                        text = "Tap • Hold to scrub",
+                        text = "Tap • Hold scrub",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -174,18 +186,46 @@ fun SkewTChart(
                 }
             }
 
-            IconButton(
-                onClick = onOpenFullscreen,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("skew_t_fullscreen_button")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.OpenInFull,
-                    contentDescription = "Open fullscreen Skew-T inspector",
-                    tint = SkyCyan,
-                    modifier = Modifier.size(18.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = 34.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (showMiniHodograph) SkyCyan.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainer)
+                        .border(
+                            1.dp,
+                            if (showMiniHodograph) SkyCyan.copy(alpha = 0.65f) else MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .clickable(onClick = onToggleMiniHodograph)
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .testTag("skew_t_mini_hodo_toggle"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Hodo",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (showMiniHodograph) FontWeight.Bold else FontWeight.Medium,
+                        color = if (showMiniHodograph) SkyCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                IconButton(
+                    onClick = onOpenFullscreen,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("skew_t_fullscreen_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInFull,
+                        contentDescription = "Open fullscreen Skew-T inspector",
+                        tint = SkyCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
 
@@ -240,7 +280,11 @@ fun SkewTChart(
                     useFahrenheit = useFahrenheit,
                     colors = chartColors,
                     textMeasurer = textMeasurer,
-                    highlightCursor = isScrubbing
+                    highlightCursor = isScrubbing,
+                    showMiniHodograph = showMiniHodograph,
+                    bunkersRightMotionKt = bunkers,
+                    shear06Kt = profile.indices.shear06Kt,
+                    insetBackgroundColor = insetBg
                 )
             }
         }
@@ -324,7 +368,11 @@ internal fun DrawScope.drawSkewTDiagram(
     useFahrenheit: Boolean,
     colors: SkewTColors,
     textMeasurer: TextMeasurer,
-    highlightCursor: Boolean = false
+    highlightCursor: Boolean = false,
+    showMiniHodograph: Boolean = false,
+    bunkersRightMotionKt: Pair<Double, Double> = 0.0 to 0.0,
+    shear06Kt: Int = 0,
+    insetBackgroundColor: Color = Color(0xD90A1322)
 ) {
     val leftPad = 36.dp.toPx()
     val rightWindCol = 42.dp.toPx()
@@ -574,6 +622,126 @@ internal fun DrawScope.drawSkewTDiagram(
         size = Size(plotW, plotH),
         style = Stroke(width = 1.2f)
     )
+
+    // 5. SHARPpy Corner Mini-Hodograph Inset (Upper-Left clear region)
+    if (showMiniHodograph && levels.size >= 3) {
+        val insetSize = minOf(plotW * 0.37f, plotH * 0.36f).coerceIn(82.dp.toPx(), 130.dp.toPx())
+        drawMiniHodographInset(
+            topLeft = Offset(leftPad + 6.dp.toPx(), topPad + 6.dp.toPx()),
+            boxSize = insetSize,
+            levels = levels,
+            bunkersRightMotionKt = bunkersRightMotionKt,
+            shear06Kt = shear06Kt,
+            colors = colors,
+            backgroundColor = insetBackgroundColor,
+            textMeasurer = textMeasurer
+        )
+    }
+}
+
+private fun DrawScope.drawMiniHodographInset(
+    topLeft: Offset,
+    boxSize: Float,
+    levels: List<SoundingLevel>,
+    bunkersRightMotionKt: Pair<Double, Double>,
+    shear06Kt: Int,
+    colors: SkewTColors,
+    backgroundColor: Color,
+    textMeasurer: TextMeasurer
+) {
+    val sfcH = levels.firstOrNull()?.heightM ?: 0.0
+    val windPts = levels.filter { it.windDirDeg != null && it.windSpeedKt != null }
+    if (windPts.size < 2) return
+
+    // Translucent frame card
+    drawRect(
+        color = backgroundColor,
+        topLeft = topLeft,
+        size = Size(boxSize, boxSize)
+    )
+    drawRect(
+        color = colors.gridColor,
+        topLeft = topLeft,
+        size = Size(boxSize, boxSize),
+        style = Stroke(width = 1.dp.toPx())
+    )
+
+    clipRect(
+        left = topLeft.x,
+        top = topLeft.y,
+        right = topLeft.x + boxSize,
+        bottom = topLeft.y + boxSize
+    ) {
+        val maxSpeed = (windPts.take(20).maxOfOrNull { it.windSpeedKt ?: 0.0 } ?: 60.0)
+            .coerceIn(60.0, 100.0)
+        val cx = topLeft.x + boxSize * 0.5f
+        val cy = topLeft.y + boxSize * 0.52f
+        val maxR = boxSize * 0.41f
+        val scale = (maxR / maxSpeed).toFloat()
+
+        // Speed rings (20, 40, 60 kt)
+        for (ring in listOf(20, 40, 60)) {
+            val r = ring * scale
+            if (r <= maxR * 1.05f) {
+                drawCircle(
+                    color = colors.gridColor.copy(alpha = 0.55f),
+                    radius = r,
+                    center = Offset(cx, cy),
+                    style = Stroke(width = 0.8f)
+                )
+            }
+        }
+        drawLine(colors.subtleLineColor, Offset(cx - maxR, cy), Offset(cx + maxR, cy), 0.7f)
+        drawLine(colors.subtleLineColor, Offset(cx, cy - maxR), Offset(cx, cy + maxR), 0.7f)
+
+        // Height-coded wind trace up to 9 km AGL
+        for (i in 0 until windPts.size - 1) {
+            val a = windPts[i]
+            val b = windPts[i + 1]
+            val aglKm = ((a.heightM - sfcH) / 1000.0).coerceAtLeast(0.0)
+            if (aglKm > 9.5) break
+            val (ua, va) = AtmosphericCalculator.windVectorFromMet(a.windDirDeg!!, a.windSpeedKt!!)
+            val (ub, vb) = AtmosphericCalculator.windVectorFromMet(b.windDirDeg!!, b.windSpeedKt!!)
+            val segColor = when {
+                aglKm < 1.0 -> InstabilityCoral
+                aglKm < 3.0 -> ThermalAmber
+                aglKm < 6.0 -> DewpointEmerald
+                aglKm < 9.0 -> SkyCyan
+                else -> StormViolet
+            }
+            drawLine(
+                color = segColor,
+                start = Offset(cx + (ua * scale).toFloat(), cy - (va * scale).toFloat()),
+                end = Offset(cx + (ub * scale).toFloat(), cy - (vb * scale).toFloat()),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
+
+        // Bunkers RM dot
+        val bx = cx + (bunkersRightMotionKt.first * scale).toFloat()
+        val by = cy - (bunkersRightMotionKt.second * scale).toFloat()
+        drawCircle(
+            color = InstabilityCoral,
+            radius = 3.2.dp.toPx(),
+            center = Offset(bx, by),
+            style = Stroke(width = 1.4.dp.toPx())
+        )
+
+        val microStyle = TextStyle(
+            color = colors.labelTextColor,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        val titleTxt = textMeasurer.measure("HODO", microStyle)
+        drawText(titleTxt, topLeft = Offset(topLeft.x + 4.dp.toPx(), topLeft.y + 2.dp.toPx()))
+
+        val shearTxt = textMeasurer.measure("0-6:${shear06Kt}kt", microStyle.copy(color = SkyCyan))
+        drawText(
+            shearTxt,
+            topLeft = Offset(topLeft.x + boxSize - shearTxt.size.width - 3.dp.toPx(), topLeft.y + boxSize - shearTxt.size.height - 2.dp.toPx())
+        )
+    }
 }
 
 private fun DrawScope.drawWindBarb(

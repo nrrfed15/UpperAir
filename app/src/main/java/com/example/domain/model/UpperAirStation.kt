@@ -147,6 +147,9 @@ object NwsStationsCatalog {
         ).take(limit)
     }
 
+    fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double =
+        haversineKm(lat1, lon1, lat2, lon2)
+
     private fun haversineKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 6371.0
         val dLat = Math.toRadians(lat2 - lat1)

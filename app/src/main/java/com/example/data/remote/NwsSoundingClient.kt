@@ -217,6 +217,67 @@ class NwsSoundingClient {
             searchLocationsOnlineInternal(clean)
         }
 
+    fun createImmediateMapStation(lat: Double, lon: Double): UpperAirStation {
+        val nearestRaob = NwsStationsCatalog.findNearestStation(lat, lon)
+        val id = buildMapPointId(lat, lon)
+        val coordLabel = formatCoordinateBrief(lat, lon)
+        return UpperAirStation(
+            id = id,
+            icao = "RRFS",
+            wmo = "MAP",
+            name = coordLabel,
+            state = nearestRaob.state,
+            region = "Custom",
+            lat = lat,
+            lon = lon,
+            elevationM = nearestRaob.elevationM,
+            raobIcaoOverride = nearestRaob.icao
+        )
+    }
+
+    suspend fun resolveMapPoint(lat: Double, lon: Double): UpperAirStation =
+        withContext(Dispatchers.IO) {
+            val base = createImmediateMapStation(lat, lon)
+            try {
+                val url = String.format(Locale.US, "https://api.weather.gov/points/%.4f,%.4f", lat, lon)
+                val body = executeGet(url) ?: return@withContext base
+                val root = JSONObject(body)
+                val props = root.optJSONObject("properties") ?: return@withContext base
+                val cwa = props.optString("cwa", "").trim()
+                val relProps = props.optJSONObject("relativeLocation")?.optJSONObject("properties")
+                val city = relProps?.optString("city", "")?.trim().orEmpty()
+                val state = relProps?.optString("state", "")?.trim().orEmpty()
+                val resolvedName = when {
+                    city.isNotBlank() -> city
+                    cwa.isNotBlank() -> "NWS $cwa Sector"
+                    else -> base.name
+                }
+                val resolvedState = state.ifBlank { base.state }
+                val resolvedIcao = if (cwa.isNotBlank()) "WFO-$cwa" else "RRFS"
+                base.copy(
+                    icao = resolvedIcao,
+                    name = resolvedName,
+                    state = resolvedState
+                )
+            } catch (_: Exception) {
+                base
+            }
+        }
+
+    private fun buildMapPointId(lat: Double, lon: Double): String {
+        val latInt = (kotlin.math.abs(lat) * 100.0).roundToInt()
+        val lonInt = (kotlin.math.abs(lon) * 100.0).roundToInt()
+        val ns = if (lat >= 0.0) "N" else "S"
+        val ew = if (lon >= 0.0) "E" else "W"
+        return "MAP_${latInt}${ns}_${lonInt}${ew}"
+    }
+
+    private fun formatCoordinateBrief(lat: Double, lon: Double): String {
+        val ns = if (lat >= 0.0) "N" else "S"
+        val ew = if (lon >= 0.0) "E" else "W"
+        return String.format(Locale.US, "%.2f°%s, %.2f°%s", kotlin.math.abs(lat), ns, kotlin.math.abs(lon), ew)
+    }
+
     private fun fetchNwsStationByCode(icaoCode: String): UpperAirStation? {
         return try {
             val body = executeGet("https://api.weather.gov/stations/$icaoCode") ?: return null

@@ -3,6 +3,7 @@ package com.example
 import android.app.Application
 import com.example.data.local.SettingsStore
 import com.example.data.local.UpperAirDatabase
+import com.example.data.remote.MapTileRepository
 import com.example.data.remote.NwsSoundingClient
 import com.example.data.repository.UpperAirRepository
 import com.example.worker.SoundingSyncScheduler
@@ -15,6 +16,7 @@ class AppContainer(application: Application) {
     private val database by lazy { UpperAirDatabase.getInstance(application) }
     private val settingsStore by lazy { SettingsStore(application) }
     private val client by lazy { NwsSoundingClient() }
+    val mapTileRepository by lazy { MapTileRepository(application) }
     val repository by lazy {
         UpperAirRepository(
             dao = database.upperAirDao(),
