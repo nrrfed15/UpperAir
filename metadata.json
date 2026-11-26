@@ -1,0 +1,6 @@
+{
+  "name": "UpperAir",
+  "description": "Automated NWS upper-atmosphere radiosonde sounding downloader and 7-day NOAA GFS forecast profile analyzer with interactive Skew-T log-P and hodograph charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

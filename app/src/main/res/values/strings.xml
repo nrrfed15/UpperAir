@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">UpperAir</string>
+    <string name="tab_sounding">Sounding</string>
+    <string name="tab_outlook">7-Day</string>
+    <string name="tab_stations">Stations</string>
+    <string name="tab_sync">Auto-Sync</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="mode_observed">Observed RAOB</string>
+    <string name="mode_forecast">7-Day GFS Model</string>
+    <string name="chart_skewt">Skew-T</string>
+    <string name="chart_hodograph">Hodograph</string>
+    <string name="chart_table">Levels</string>
+</resources>
